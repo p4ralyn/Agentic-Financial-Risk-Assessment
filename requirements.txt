@@ -1,0 +1,7 @@
+streamlit
+langchain-core
+langgraph
+langchain-google-genai
+python-dotenv
+yfinance
+pandas
