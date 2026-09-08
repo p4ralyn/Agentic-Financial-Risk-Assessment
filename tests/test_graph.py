@@ -141,3 +141,54 @@ def test_graph_stops_retrying_against_an_always_rejecting_validator(stub_assess)
     assert counter["validator"] == g.MAX_ATTEMPTS
     assert out["validation_attempts"] == g.MAX_ATTEMPTS
     assert out["final_risk_assessment_report"], "the best attempt is still returned"
+
+
+def test_message_text_passes_through_plain_string():
+    assert g.message_text("a report") == "a report"
+
+
+def test_message_text_flattens_gemini_content_blocks():
+    """Gemini 3.x returns blocks, not a string. Without flattening, the raw
+    list reaches the report and the dashboard renders a Python repr."""
+    content = [{"type": "text", "text": "first"},
+               {"type": "text", "text": "second"}]
+    assert g.message_text(content) == "first\nsecond"
+
+
+def test_message_text_drops_non_text_blocks():
+    """Thinking signatures must never reach the rendered report."""
+    content = [{"type": "text", "text": "visible"},
+               {"type": "thinking", "extras": {"signature": "SECRET"}}]
+    out = g.message_text(content)
+    assert out == "visible"
+    assert "SECRET" not in out
+
+
+def test_agent_node_stores_flattened_text(monkeypatch):
+    from langchain_core.messages import AIMessage
+
+    class BlockLLM:
+        def invoke(self, messages):
+            return AIMessage(content=[{"type": "text", "text": "the report"}])
+
+    out = g.make_agent_node(BlockLLM())({"messages": []})
+    assert out["final_risk_assessment_report"] == "the report"
+
+
+def test_validator_is_shown_the_z_score():
+    """The analyst is given the Z-score; a validator that cannot see it
+    flags the figure as unsupplied data."""
+    seen = {}
+
+    class CapturingValidator:
+        def invoke(self, messages):
+            seen["prompt"] = messages[-1].content
+            return g.ValidationReport(final_score=90)
+
+    g.make_validator_node(CapturingValidator())({
+        "messages": [], "company_ratios": {}, "industry_median_ratios": {},
+        "z_score": 1.31, "z_band": "distress",
+        "final_risk_assessment_report": "r", "validation_attempts": 0,
+    })
+    assert "1.31" in seen["prompt"]
+    assert "distress" in seen["prompt"]

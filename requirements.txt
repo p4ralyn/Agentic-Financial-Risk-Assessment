@@ -1,6 +1,10 @@
 streamlit==1.51.0
 langchain-core==1.1.0
 langgraph==1.0.4
+# Pinned explicitly: langgraph 1.0.4 permits prebuilt <1.1.0, but 1.0.10
+# imports langgraph.runtime.ExecutionInfo, which 1.0.4 does not define, so
+# a clean install of the unpinned range breaks on import.
+langgraph-prebuilt==1.0.4
 langchain-google-genai==3.2.0
 python-dotenv==1.2.1
 yfinance==0.2.66

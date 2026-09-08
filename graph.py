@@ -25,6 +25,10 @@ load_dotenv()
 VALIDATION_THRESHOLD = 70
 MAX_ATTEMPTS = 3
 
+# One constant so the analyst and the validator can never drift apart.
+# gemini-2.0-flash was retired; the API names this as its replacement.
+MODEL = "gemini-3.6-flash"
+
 
 class AgentState(TypedDict):
     ticker: str
@@ -122,21 +126,48 @@ def fetch_financials(state: AgentState) -> dict:
     }
 
 
+def message_text(content) -> str:
+    """Flatten message content to plain text.
+
+    Gemini 3.x returns a list of content blocks rather than a string, and the
+    blocks carry non-text entries (thinking signatures) that must not reach
+    the report. Older models return a plain string, which passes through.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        return "\n".join(p for p in parts if p)
+    return str(content)
+
+
 def make_agent_node(llm_with_tools):
     def agent_node(state: AgentState) -> dict:
         response = llm_with_tools.invoke(state["messages"])
         update = {"messages": [response]}
         if isinstance(response, AIMessage) and not response.tool_calls:
-            update["final_risk_assessment_report"] = response.content
+            update["final_risk_assessment_report"] = message_text(response.content)
         return update
     return agent_node
 
 
 def make_validator_node(validator_llm):
     def validator_node(state: AgentState) -> dict:
+        # The Z-score must be supplied here too. The analyst is given it, so
+        # a validator that cannot see it flags the figure as invented.
         prompt = (
             f"COMPANY RATIOS:\n{state.get('company_ratios')}\n\n"
             f"INDUSTRY MEDIAN RATIOS:\n{state.get('industry_median_ratios')}\n\n"
+            f"ALTMAN Z-SCORE: {state.get('z_score')} "
+            f"(band: {state.get('z_band')})\n\n"
+            f"COMPANY: {state.get('company_name')} ({state.get('ticker')}), "
+            f"industry {state.get('industry_name')}, "
+            f"peers {state.get('peer_tickers')}\n\n"
             f"ANALYST REPORT:\n{state.get('final_risk_assessment_report')}"
         )
         report = validator_llm.invoke([
@@ -179,9 +210,9 @@ def correction_node(state: AgentState) -> dict:
 
 
 def build_graph(llm=None, validator_llm=None):
-    llm = llm or ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.7)
+    llm = llm or ChatGoogleGenerativeAI(model=MODEL, temperature=0.7)
     validator_llm = validator_llm or ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash", temperature=0
+        model=MODEL, temperature=0
     ).with_structured_output(ValidationReport)
 
     workflow = StateGraph(AgentState)
