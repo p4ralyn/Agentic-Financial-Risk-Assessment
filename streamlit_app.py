@@ -1,109 +1,169 @@
+import uuid
+
 import streamlit as st
-from agentic_system import SYSTEM_PROMPT_AGENT, app, get_thread_id
-from langchain_core.messages import HumanMessage, AIMessage
 
-st.set_page_config(page_title="Financial Risk AI", page_icon="📈")
+from graph import build_graph, initial_state
 
-st.title("Financial Risk Assessment AI")
+st.set_page_config(page_title="Financial risk", page_icon="📉", layout="wide")
 
-st.sidebar.header("Configure Your Analysis")
-
-industry_options = [
-    "Telecommunications", "Technology", "Automotive", "Banking",
-    "Pharmaceuticals", "Energy", "Retail", "Consumer Goods"
-]
-
-industry = st.sidebar.selectbox("Select Industry", industry_options)
-company_name = st.sidebar.text_input("Company Name", "")
-
-st.sidebar.subheader("Financial Ratios")
-
-ratios_sidebar = {
-    "current_ratio": st.sidebar.number_input("Current Ratio", value=0.0),
-    "quick_ratio": st.sidebar.number_input("Quick Ratio", value=0.0),
-    "cash_ratio": st.sidebar.number_input("Cash Ratio", value=0.0),
-    "debt_to_equity": st.sidebar.number_input("Debt to Equity", value=0.0),
-    "interest_coverage": st.sidebar.number_input("Interest Coverage", value=0.0),
-    "operating_margin": st.sidebar.number_input("Operating Margin (%)", value=0.0),
-    "net_margin": st.sidebar.number_input("Net Profit Margin (%)", value=0.0),
-    "roa": st.sidebar.number_input("ROA (%)", value=0.0),
-    "roe": st.sidebar.number_input("ROE (%)", value=0.0),
-    "asset_turnover": st.sidebar.number_input("Asset Turnover", value=0.0),
-    "inventory_turnover": st.sidebar.number_input("Inventory Turnover", value=0.0),
-    "receivables_days": st.sidebar.number_input("Receivables Days", value=0),
-    "payable_days": st.sidebar.number_input("Payable Days", value=0),
-    "z_score": st.sidebar.number_input("Altman Z-Score", value=0.0),
-    "ocf": st.sidebar.number_input("Operating Cash Flow (M)", value=0.0),
-    "fcf": st.sidebar.number_input("Free Cash Flow (M)", value=0.0),
+BANDS = {
+    "distress": ("#A33B32", "Elevated risk"),
+    "grey": ("#B08334", "Mixed signals"),
+    "safe": ("#2F6F5E", "Low risk"),
+    "unknown": ("#6B7A88", "Risk not scored"),
 }
 
-# Session state sync
-st.session_state.industry = industry
-st.session_state.company_name = company_name
-st.session_state.company_ratios = ratios_sidebar
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+:root { --ink:#101A24; --rule:#D3DAE0; --muted:#5A6B7B; }
+
+html, body, [class*="css"] { font-family:'IBM Plex Sans',system-ui,sans-serif; }
+
+.identity { display:flex; align-items:baseline; gap:.75rem; flex-wrap:wrap;
+  border-bottom:1px solid var(--rule); padding-bottom:.5rem; margin-bottom:1.5rem; }
+.identity .name { font-family:'Newsreader',Georgia,serif; font-size:1.6rem;
+  color:var(--ink); }
+.identity .meta { color:var(--muted); font-size:.9rem;
+  border-left:1px solid var(--rule); padding-left:.75rem; }
+
+.verdict { display:flex; align-items:baseline; justify-content:space-between;
+  gap:1rem; flex-wrap:wrap; margin-bottom:.25rem; }
+.verdict .label { font-family:'Newsreader',Georgia,serif; font-size:2.6rem;
+  line-height:1.1; }
+.verdict .z { font-size:1rem; color:var(--muted); }
+.verdict .z b { font-family:'Newsreader',Georgia,serif; font-size:2rem;
+  color:var(--ink); font-weight:500; font-variant-numeric:tabular-nums; }
+
+.scale { position:relative; height:8px; border-radius:4px; margin:1.5rem 0 .4rem;
+  background:linear-gradient(90deg,#A33B32 0%,#A33B32 36.2%,#B08334 36.2%,
+    #B08334 59.8%,#2F6F5E 59.8%,#2F6F5E 100%); }
+.marker { position:absolute; top:-6px; width:2px; height:20px; background:var(--ink);
+  transition:left .6s cubic-bezier(.22,.61,.36,1); }
+.marker::after { content:''; position:absolute; left:-4px; top:-4px; width:10px;
+  height:10px; border-radius:50%; background:var(--ink); }
+.ticks { display:flex; justify-content:space-between; color:var(--muted);
+  font-size:.78rem; font-variant-numeric:tabular-nums; }
+
+.report { font-family:'Newsreader',Georgia,serif; font-size:1.05rem;
+  line-height:1.65; max-width:68ch; }
+
+.empty { font-family:'Newsreader',Georgia,serif; font-size:1.15rem;
+  color:var(--muted); max-width:52ch; line-height:1.6; }
+
+@media (prefers-reduced-motion:reduce) { .marker { transition:none; } }
+</style>
+""", unsafe_allow_html=True)
 
 if "thread_id" not in st.session_state:
-    st.session_state.thread_id = get_thread_id()
+    # Per session. v2 shared one module-level id across every user on a
+    # container, leaking one person's history into another's context.
+    st.session_state.thread_id = str(uuid.uuid4())
+if "graph" not in st.session_state:
+    st.session_state.graph = build_graph()
+if "result" not in st.session_state:
+    st.session_state.result = None
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+with st.sidebar:
+    st.markdown("### Assess a company")
+    ticker = st.text_input("Ticker", value="", placeholder="VZ").strip().upper()
+    question = st.text_area(
+        "Question",
+        value="Assess this company's bankruptcy risk against its industry peers.",
+        height=90,
+    )
+    run = st.button("Assess risk", type="primary", use_container_width=True)
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+if run and not ticker:
+    st.warning("Enter a ticker symbol to run an assessment.")
+elif run:
+    with st.spinner(f"Fetching {ticker} and its peer group…"):
+        try:
+            st.session_state.result = st.session_state.graph.invoke(
+                initial_state(ticker, question),
+                config={"configurable": {"thread_id": st.session_state.thread_id},
+                        "recursion_limit": 25},
+            )
+        except ValueError as exc:
+            st.session_state.result = None
+            st.error(str(exc))
+        except Exception as exc:
+            st.session_state.result = None
+            st.error(f"The assessment could not be completed: {exc}")
 
-prompt = st.chat_input("Ask questions or request analysis...")
+result = st.session_state.result
 
-if prompt:
-    st.session_state.messages.append({"role": "user", "content": prompt})
+if result is None:
+    st.markdown("<div class='identity'><span class='name'>Financial risk</span>"
+                "</div>", unsafe_allow_html=True)
+    st.markdown("<p class='empty'>Enter a ticker to assess bankruptcy risk "
+                "against its industry peers.</p>", unsafe_allow_html=True)
+    st.stop()
 
-    with st.chat_message("user"):
-        st.markdown(prompt)
+band = result.get("z_band") or "unknown"
+colour, verdict = BANDS[band]
+z = result.get("z_score")
 
-    with st.chat_message("assistant"):
-        with st.spinner("Analyzing..."):
+st.markdown(
+    f"<div class='identity'><span class='name'>{result.get('company_name')}</span>"
+    f"<span class='meta'>{result.get('ticker')} &nbsp; "
+    f"{result.get('industry_name') or 'Industry unmapped'}</span></div>",
+    unsafe_allow_html=True)
 
-            # Build messages for LangGraph
-            initial_messages = [
-                HumanMessage(content=SYSTEM_PROMPT_AGENT),
-                HumanMessage(content=f"Industry: {st.session_state.industry}"),
-                HumanMessage(content=f"Company Name: {st.session_state.company_name}"),
-                HumanMessage(content=f"Financial Ratios: {st.session_state.company_ratios}"),
-                HumanMessage(content=prompt),
-            ]
+z_text = f"<b>{z:.2f}</b>" if z is not None else "<b>—</b>"
+st.markdown(
+    f"<div class='verdict'><span class='label' style='color:{colour}'>{verdict}"
+    f"</span><span class='z'>Altman Z {z_text}</span></div>",
+    unsafe_allow_html=True)
 
-            # Build graph state
-            initial_state = {
-                "industry_name": st.session_state.industry,
-                "company_name": st.session_state.company_name,
-                "company_ratios": st.session_state.company_ratios,
-                "industry_median_ratios": None,
-                "messages": initial_messages,
-                "final_risk_assessment_report": None,
-            }
+# Marker position: 0 at Z=0, full width at Z=5, clamped. The gradient stops
+# at 36.2% and 59.8% are 1.81/5 and 2.99/5, so the bands line up with the ticks.
+pct = 0.0 if z is None else max(0.0, min(z / 5.0, 1.0)) * 100
+st.markdown(
+    f"<div class='scale'><div class='marker' style='left:{pct:.1f}%'></div></div>"
+    f"<div class='ticks'><span>0</span><span>1.81 distress</span>"
+    f"<span>2.99 grey</span><span>5+ safe</span></div>",
+    unsafe_allow_html=True)
 
-            # Stream agent
-            ai_output_text = ""
-            for s in app.stream(
-                initial_state,
-                config={"configurable": {"thread_id": st.session_state.thread_id}}
-            ):
-                if "agent" in s:
-                    msg = s["agent"]["messages"][-1]
-                    if isinstance(msg, AIMessage):
-                        ai_output_text = msg.content
+st.markdown("")
 
-            # Display result
-            st.markdown(ai_output_text)
-            st.session_state.messages.append({"role": "assistant", "content": ai_output_text})
+company = result.get("company_ratios") or {}
+peers = result.get("industry_median_ratios") or {}
+if company:
+    rows = []
+    for name in sorted(company):
+        mine, theirs = company[name], peers.get(name)
+        delta = None if mine is None or theirs is None else mine - theirs
+        rows.append({
+            "Ratio": name.replace("_", " ").capitalize(),
+            "Company": "—" if mine is None else round(mine, 3),
+            "Peer median": "—" if theirs is None else round(theirs, 3),
+            "Δ": "—" if delta is None else f"{delta:+.3f}",
+        })
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.caption("A dash means the ratio is not computable from the filed "
+               "statements — most often because equity is zero or negative.")
 
-            try:
-                full_state = app.get_state(config={"configurable": {"thread_id": st.session_state.thread_id}})
-                validator_json = full_state.values.get("validator_json", None)
-            except:
-                validator_json = None
+report = result.get("final_risk_assessment_report")
+if report:
+    st.markdown(f"<div class='report'>{report}</div>", unsafe_allow_html=True)
 
-            if validator_json:
-                st.markdown("### 🧮 Validator Report")
-                with st.expander("View Validator JSON"):
-                    st.code(validator_json, language="json")
+validation = result.get("validation")
+if validation:
+    score = validation.get("final_score", 0)
+    attempts = result.get("validation_attempts", 0)
+    if score >= 70:
+        when = "the first attempt" if attempts <= 1 else f"attempt {attempts}"
+        st.success(f"Validated {score}/100 on {when}.")
+    else:
+        st.warning(f"Failed validation at {score}/100 after {attempts} attempts. "
+                   "The report is shown with the validator's objections.")
+    flags = validation.get("logic_flags") or []
+    if flags:
+        with st.expander("What the validator flagged"):
+            for flag in flags:
+                st.markdown(f"- {flag}")
+
+for err in result.get("data_errors") or []:
+    st.caption(f"Peer data unavailable — {err}")

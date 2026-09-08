@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   financial-risk-app:
     container_name: financial-risk-app
@@ -7,10 +5,13 @@ services:
     restart: always
 
     ports:
-      - "8501:8501"
+      - "8080:8080"
 
     env_file:
       - .env
 
     volumes:
-      - .:/app
+      - ./streamlit_app.py:/app/streamlit_app.py
+      - ./graph.py:/app/graph.py
+      - ./ratios.py:/app/ratios.py
+      - ./financial_data.py:/app/financial_data.py
