@@ -1,8 +1,10 @@
 .env
 *.pyc
 __pycache__/
+.venv/
 venv/
 myenv/
 .DS_Store
 *.log
-
+.pytest_cache/
+.idea/
