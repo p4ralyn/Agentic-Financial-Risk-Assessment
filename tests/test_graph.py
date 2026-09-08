@@ -58,7 +58,8 @@ def test_fetch_node_skips_when_ratios_already_present_for_ticker():
 
 
 def test_validator_output_does_not_enter_messages():
-    """v2 appended the validator JSON to messages, polluting every later turn."""
+    """The critique must stay out of messages, or it becomes context for
+    every later turn."""
     class FakeValidator:
         def invoke(self, _):
             return g.ValidationReport(

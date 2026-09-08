@@ -1,8 +1,4 @@
-"""yfinance access and peer-group assembly.
-
-The industry tables are carried over from v2's utils.py, which defined them
-and then never imported them anywhere.
-"""
+"""yfinance access and peer-group assembly."""
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 

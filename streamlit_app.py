@@ -57,8 +57,9 @@ html, body, [class*="css"] { font-family:'IBM Plex Sans',system-ui,sans-serif; }
 """, unsafe_allow_html=True)
 
 if "thread_id" not in st.session_state:
-    # Per session. v2 shared one module-level id across every user on a
-    # container, leaking one person's history into another's context.
+    # One thread per browser session. A module-level id would be shared by
+    # every visitor to a container, leaking one person's history into
+    # another's context.
     st.session_state.thread_id = str(uuid.uuid4())
 if "graph" not in st.session_state:
     st.session_state.graph = build_graph()

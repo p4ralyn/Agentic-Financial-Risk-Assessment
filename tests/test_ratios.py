@@ -60,8 +60,8 @@ def test_efficiency_ratios():
 
 
 def test_negative_equity_yields_none_not_infinity():
-    """The v2 bug: negative equity produced inf, which the prompt read as
-    'extremely strong'. Negative equity is severe distress."""
+    """Negative equity must not produce inf. A reader treating inf as
+    'no debt burden' would invert the signal on a distressed balance sheet."""
     fields = {**HEALTHY, "equity": -100.0}
     r = compute_ratios(fields)
     assert r["debt_to_equity"] is None

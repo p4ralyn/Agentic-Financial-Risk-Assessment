@@ -4,8 +4,9 @@
                                                                        +-> END
 
 fetch_financials runs before the model, so the ratios the validator checks
-against are guaranteed present. In v2 the ratios came from Streamlit number
-inputs defaulting to 0.0, so the validator compared the report to zeros.
+against are always real computed figures. Leaving the fetch to a tool call
+would let the model decline to call it and leave the validator with nothing
+to check the report against.
 """
 from typing import Annotated, List, TypedDict
 
@@ -174,8 +175,8 @@ def make_validator_node(validator_llm):
             HumanMessage(content=SYSTEM_PROMPT_VALIDATOR),
             HumanMessage(content=prompt),
         ])
-        # Deliberately no "messages" key: v2 appended this JSON to the
-        # transcript, so it became context for every subsequent turn.
+        # No "messages" key: the critique stays out of the transcript so it
+        # does not become context for every subsequent turn.
         return {
             "validation": report.model_dump(),
             "validation_attempts": state.get("validation_attempts", 0) + 1,

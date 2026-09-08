@@ -1,9 +1,9 @@
 """Financial ratio math. Pure functions, no I/O.
 
 A missing input or an unusable denominator yields None, never 0 and never
-inf. v2 returned float('inf') and instructed the model to read it as
-"extremely strong" -- but debt_to_equity reaches inf exactly when equity is
-zero or negative, which is severe distress. That inverted the signal on the
+inf. Returning inf would be actively misleading here: debt_to_equity reaches
+it exactly when equity is zero or negative, which is severe distress, so a
+reader treating inf as "no debt burden" would invert the signal on the
 companies this tool exists to catch.
 """
 from statistics import median
