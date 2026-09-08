@@ -1,53 +1,45 @@
-from tools import get_industry_financial_data
-from langchain_core.messages import HumanMessage, BaseMessage, ToolMessage, AIMessage
-import datetime
+"""CLI front end. Usage: python main.py VZ"""
 import os
+import sys
 
-from agentic_system import app, AgentState, SYSTEM_PROMPT_AGENT, THREAD_ID
+from graph import build_graph, initial_state
+
+
+def main() -> int:
+    if not os.getenv("GOOGLE_API_KEY"):
+        print("GOOGLE_API_KEY is not set. Add it to .env or export it.")
+        return 1
+
+    ticker = sys.argv[1] if len(sys.argv) > 1 else "VZ"
+    question = "Assess this company's bankruptcy risk against its industry peers."
+
+    try:
+        result = build_graph().invoke(
+            initial_state(ticker, question),
+            config={"configurable": {"thread_id": f"cli-{ticker}"},
+                    "recursion_limit": 25},
+        )
+    except ValueError as exc:
+        print(exc)
+        return 1
+
+    z, band = result.get("z_score"), result.get("z_band")
+    print(f"\n{result.get('company_name')} ({result.get('ticker')}) — "
+          f"{result.get('industry_name')}")
+    print(f"Altman Z: {z if z is None else round(z, 2)} ({band})\n")
+    print(result.get("final_risk_assessment_report") or "No report produced.")
+
+    validation = result.get("validation") or {}
+    if validation:
+        print(f"\nValidation: {validation.get('final_score')}/100 after "
+              f"{result.get('validation_attempts')} attempt(s)")
+        for flag in validation.get("logic_flags") or []:
+            print(f"  - {flag}")
+
+    for err in result.get("data_errors") or []:
+        print(f"  peer data unavailable: {err}")
+    return 0
+
 
 if __name__ == "__main__":
-
-    if not os.getenv("GOOGLE_API_KEY"):
-        print("Error: GOOGLE_API_KEY not found. Please export it.")
-        exit()
-
-    industry_to_assess = "Telecommunications"
-
-    initial_messages = [
-        HumanMessage(content=SYSTEM_PROMPT_AGENT),
-        HumanMessage(content=f"Assess the financial risk of the {industry_to_assess} industry.")
-    ]
-
-    initial_state = {
-        "industry_name": industry_to_assess,
-        "company_ratios": None,
-        "industry_median_ratios": None,
-        "messages": initial_messages,
-        "final_risk_assessment_report": None
-    }
-
-    final_state = None
-
-    for s in app.stream(initial_state, config={"configurable": {"thread_id": THREAD_ID}}):
-        print(s)
-        final_state = s
-
-    if final_state:
-        msgs = (
-            final_state.get("messages")
-            or final_state.get("agent", {}).get("messages")
-        )
-
-        if msgs:
-            final_ai = None
-            for msg in reversed(msgs):
-                if isinstance(msg, AIMessage) and not msg.tool_calls:
-                    final_ai = msg
-                    break
-
-            if final_ai:
-                print("\n--- FINAL RISK ASSESSMENT REPORT ---")
-                print(final_ai.content)
-            else:
-                print("\n--- Could not find final AI report. ---")
-    print("\n--- Done ---")
+    raise SystemExit(main())

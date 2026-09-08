@@ -1,68 +1,101 @@
-# Agentic Financial Risk Assessment System 📉🤖
+# Agentic Financial Risk Assessment
 
-An autonomous AI agent designed to analyze corporate financial health, detect bankruptcy risks, and generate audit-grade risk reports. Built on **LangGraph**, this system features a self-correcting multi-agent architecture that validates generated insights against real-time market data.
+An autonomous agent that assesses a public company's bankruptcy risk by
+computing its financial ratios from filed statements, benchmarking them
+against its industry peers, and refusing to publish a report the numbers
+do not support.
 
-## 🌟 Key Features
+Built on LangGraph. The distinguishing piece is the validation loop: a
+second agent scores the analyst's report against the ratios that were
+actually computed, and a report scoring below 70 is sent back for
+correction rather than shown.
 
-* **Multi-Agent Workflow:** Orchestrates two distinct agents:
-    * **Analyst:** Generates risk reports based on financial data.
-    * **Validator:** Critiques the report against raw metrics to ensure logical consistency.
-* **Live Market Data:** Custom tool integration with **Yahoo Finance (yfinance)** to fetch real-time stock and ratio data.
-* **Strict Validation:** A specialized JSON-based validation node cross-references 15+ financial ratios (e.g., Altman Z-Score, Current Ratio) to eliminate hallucinations.
-* **Cloud Native:** Containerized with **Docker** and deployed as a serverless microservice on **Google Cloud Run**.
+## How it works
 
-## 🏗️ Tech Stack
+1. **Input** — a ticker symbol, for example `VZ`.
+2. **Fetch** — a deterministic node pulls the balance sheet and income
+   statement from Yahoo Finance, computes fourteen ratios and the Altman
+   Z-score, and does the same concurrently for the company's industry
+   peers to produce benchmark medians.
+3. **Analysis** — the analyst agent writes a risk report, arguing from the
+   gap between the company's ratios and the peer medians.
+4. **Validation** — the validator agent scores the report 0–100 against
+   those same ratios, flagging unsupported claims and internal
+   contradictions.
+5. **Correction** — below 70, the report returns to the analyst with the
+   specific flags to fix. At most two corrections, then the best attempt is
+   shown with its objections attached.
 
-* **Framework:** LangChain, LangGraph
-* **LLM:** Google Gemini 2.0 Flash
-* **Frontend:** Streamlit
-* **Data Source:** Yahoo Finance API (`yfinance`)
-* **Deployment:** Docker, Google Cloud Platform (Cloud Run)
+Ratios are computed, never entered by hand, so the validator always has
+real numbers to check against.
 
-## 📦 Installation & Setup
+### On missing ratios
 
-1.  **Clone the Repository**
-    ```bash
-    git clone [https://github.com/yourusername/financial-risk-agent.git](https://github.com/yourusername/financial-risk-agent.git)
-    cd financial-risk-agent
-    ```
+A ratio that cannot be computed is reported as null, not as zero and not as
+infinity. This matters most for debt-to-equity and return on equity, which
+have no meaningful value when shareholders' equity is zero or negative —
+a condition indicating severe distress. The agent is instructed to read a
+null as "not computable", never as a clean bill of health.
 
-2.  **Environment Variables**
-    Create a `.env` file and add your Google API Key:
-    ```env
-    GOOGLE_API_KEY=your_gemini_api_key
-    ```
+## Tech stack
 
-3.  **Run Locally (Python)**
-    ```bash
-    pip install -r requirements.txt
-    streamlit run streamlit_app.py
-    ```
+- **Framework** — LangChain, LangGraph
+- **Model** — Google Gemini 2.0 Flash
+- **Frontend** — Streamlit
+- **Data** — Yahoo Finance (`yfinance`)
+- **Deployment** — Docker, Google Cloud Run
 
-## 🐳 Docker Deployment
+## Layout
 
-1.  **Build the Container**
-    ```bash
-    docker build -t risk-agent .
-    ```
+| File | Responsibility |
+|---|---|
+| `ratios.py` | Ratio math, Altman Z-score, median aggregation. Pure functions |
+| `financial_data.py` | Industry maps, Yahoo Finance access, peer-group fetch |
+| `graph.py` | Agent state, prompts, validation schema, nodes and edges |
+| `streamlit_app.py` | Dashboard |
+| `main.py` | CLI |
 
-2.  **Run Container Locally**
-    ```bash
-    docker run -p 8080:8080 --env-file .env risk-agent
-    ```
+## Setup
 
-3.  **Deploy to Google Cloud Run**
-    ```bash
-    gcloud run deploy risk-agent-service \
-      --source . \
-      --region us-central1 \
-      --allow-unauthenticated
-    ```
+```bash
+pip install -r requirements.txt
+echo "GOOGLE_API_KEY=your_key" > .env
+streamlit run streamlit_app.py
+```
 
-## 🔄 Workflow Logic
+Or from the command line:
 
-1.  **Input:** User provides a Ticker Symbol (e.g., `AAPL`).
-2.  **Tool Call:** Agent fetches live balance sheet and income statement data via `yfinance`.
-3.  **Analysis:** The *Analyst Agent* computes ratios (Liquidity, Solvency, Profitability) and drafts a preliminary risk assessment.
-4.  **Validation:** The *Validator Agent* reviews the draft against the calculated ratios. If discrepancies are found (e.g., claiming "High Solvency" despite a high Debt/Equity ratio), it rejects the report.
-5.  **Output:** A finalized, validated risk report is displayed on the Streamlit dashboard.
+```bash
+python main.py VZ
+```
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The suite runs offline: Yahoo Finance is mocked with fixture frames and the
+model is stubbed, so no test makes a network call or spends quota. It covers
+the ratio math (including zero and negative equity), the yfinance field-name
+aliases, and — driving the compiled graph — that the retry loop terminates
+against a validator that always rejects.
+
+## Docker
+
+```bash
+docker build -t risk-agent .
+docker run -p 8080:8080 --env-file .env risk-agent
+```
+
+The container binds `$PORT`, defaulting to 8080, which is what Cloud Run
+injects:
+
+```bash
+gcloud run deploy risk-agent-service \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated
+```
+
